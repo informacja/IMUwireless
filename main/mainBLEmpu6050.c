@@ -23,7 +23,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_bt.h"
-#include "esp_bt_main.h" 
+#include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_gatt_defs.h"
@@ -49,6 +49,7 @@ static uint16_t conn_id_g = 0;
 static esp_gatt_if_t gatts_if_g = ESP_GATT_IF_NONE;
 static volatile bool notify_enabled = false;
 static volatile bool is_connected = false;
+static uint8_t last_payload[12] = {0};   // ostatnie wyslane dane - do odpowiedzi na odczyt
 
 static uint8_t adv_config_done = 0;
 #define ADV_CONFIG_FLAG      (1 << 0)
@@ -157,11 +158,38 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         esp_ble_gap_start_advertising(&adv_params);
         break;
 
+    case ESP_GATTS_READ_EVT: {
+        // Bez odpowiedzi na odczyt MATLAB (i kazdy inny klient BLE) nie jest w stanie
+        // poprawnie zweryfikowac stanu subskrypcji (deskryptor CCCD) ani odczytac wartosci.
+        esp_gatt_rsp_t rsp;
+        memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+        rsp.attr_value.handle = param->read.handle;
+
+        if (param->read.handle == char_cccd_handle) {
+            rsp.attr_value.len = 2;
+            rsp.attr_value.value[0] = notify_enabled ? 0x01 : 0x00;
+            rsp.attr_value.value[1] = 0x00;
+        } else if (param->read.handle == char_handle) {
+            rsp.attr_value.len = sizeof(last_payload);
+            memcpy(rsp.attr_value.value, last_payload, sizeof(last_payload));
+        } else {
+            rsp.attr_value.len = 0;
+        }
+
+        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
+        break;
+    }
+
     case ESP_GATTS_WRITE_EVT:
         if (!param->write.is_prep && param->write.handle == char_cccd_handle && param->write.len == 2) {
             uint16_t cccd_val = param->write.value[0] | (param->write.value[1] << 8);
             notify_enabled = (cccd_val == 0x0001);
             ESP_LOGI(TAG, "Powiadomienia %s przez klienta.", notify_enabled ? "wlaczone" : "wylaczone");
+        }
+        // Zapis typu "Write Request" (w odroznieniu od "Write Without Response")
+        // MUSI zostac potwierdzony, inaczej klient (MATLAB) zawiesi sie na oczekiwaniu.
+        if (param->write.need_rsp) {
+            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
         }
         break;
 
@@ -194,6 +222,7 @@ static void sensor_task(void *arg)
                 (int16_t)(d.ax * 1000.0f), (int16_t)(d.ay * 1000.0f), (int16_t)(d.az * 1000.0f),
                 (int16_t)(d.gx * 10.0f),   (int16_t)(d.gy * 10.0f),   (int16_t)(d.gz * 10.0f),
             };
+            memcpy(last_payload, payload, sizeof(payload));
             esp_ble_gatts_send_indicate(gatts_if_g, conn_id_g, char_handle,
                                          sizeof(payload), (uint8_t *)payload, false);
         }
