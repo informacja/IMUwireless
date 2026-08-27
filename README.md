@@ -1,3 +1,12 @@
+### There is 3 main files:
+ - main/led_strip_example_main.c (UART sending and rainbow LED)
+ - main/mainBLEmpu6050.c
+
+ and example of WIFI connection ONLY
+ - main/mainWIFI(example_sinDataSending).c
+
+ To recive data in Matlab use use scripts in *matlab* folder
+ #
 | Supported Targets | ESP32 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-H2 | ESP32-H21 | ESP32-H4 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
 | ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- | -------- |
 # RMT Transmit Example -- LED Strip
